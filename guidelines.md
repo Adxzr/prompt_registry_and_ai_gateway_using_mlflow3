@@ -31,14 +31,13 @@ clear, neutral sentences that capture the key points.
 """
 
 def summarize(text: str, num_sentences: int) -> str:
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": text},
-        ],
+    response = client.responses.create(
+        model="gpt-6-luna",
+        reasoning={"effort": "medium"},
+        instructions=SYSTEM_PROMPT.format(num_sentences=num_sentences),
+        input=text,
     )
-    return response.choices[0].message.content
+    return response.output_text
 ```
 
 Common variations of "no registry" storage:
@@ -173,13 +172,12 @@ import openai
 
 prompt = mlflow.genai.load_prompt("prompts:/summarization-prompt/1")
 
-response = openai.OpenAI().chat.completions.create(
-    model="gpt-4o-mini",
-    messages=[
-        {"role": "user", "content": prompt.format(num_sentences=2, content="...")},
-    ],
+response = openai.OpenAI().responses.create(
+    model="gpt-6-luna",
+    reasoning={"effort": "medium"},
+    input=prompt.format(num_sentences=2, content="..."),
 )
-print(response.choices[0].message.content)
+print(response.output_text)
 ```
 
 > Tip: When `load_prompt()` is called inside a traced function or a logged
@@ -365,12 +363,12 @@ from mlflow.genai.scorers import Correctness
 
 def predict_fn(content: str, num_sentences: int) -> str:
     prompt = mlflow.genai.load_prompt("prompts:/summarization-prompt@production")
-    completion = openai.OpenAI().chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt.format(
-            content=content, num_sentences=num_sentences)}],
+    response = openai.OpenAI().responses.create(
+        model="gpt-6-luna",
+        reasoning={"effort": "medium"},
+        input=prompt.format(content=content, num_sentences=num_sentences),
     )
-    return completion.choices[0].message.content
+    return response.output_text
 
 eval_data = [
     {
@@ -383,7 +381,7 @@ eval_data = [
 results = mlflow.genai.evaluate(
     data=eval_data,
     predict_fn=predict_fn,
-    scorers=[Correctness(model="openai:/gpt-4o-mini")],
+    scorers=[Correctness(model="openai:/gpt-6-luna")],
 )
 ```
 
@@ -421,11 +419,12 @@ prompt = mlflow.genai.register_prompt(
 
 def predict_fn(sentence: str) -> str:
     p = mlflow.genai.load_prompt("prompts:/medical_section_classifier/1")
-    completion = openai.OpenAI().chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": p.format(sentence=sentence)}],
+    response = openai.OpenAI().responses.create(
+        model="gpt-6-luna",
+        reasoning={"effort": "medium"},
+        input=p.format(sentence=sentence),
     )
-    return completion.choices[0].message.content
+    return response.output_text
 
 train_data = [
     {"inputs": {"sentence": "This study is a randomised controlled trial..."},
@@ -439,8 +438,8 @@ result = mlflow.genai.optimize_prompts(
     predict_fn=predict_fn,
     train_data=train_data,
     prompt_uris=[prompt.uri],
-    optimizer=GepaPromptOptimizer(reflection_model="openai:/gpt-4o", max_metric_calls=300),
-    scorers=[Correctness(model="openai:/gpt-4o-mini")],
+    optimizer=GepaPromptOptimizer(reflection_model="openai:/gpt-6-luna", max_metric_calls=300),
+    scorers=[Correctness(model="openai:/gpt-6-luna")],
 )
 
 optimized = result.optimized_prompts[0]
@@ -479,7 +478,7 @@ result = mlflow.genai.optimize_prompts(
     predict_fn=predict_fn,
     train_data=train_data,
     prompt_uris=[prompt.uri],
-    optimizer=GepaPromptOptimizer(reflection_model="openai:/gpt-4o"),
+    optimizer=GepaPromptOptimizer(reflection_model="openai:/gpt-6-luna"),
     scorers=[accuracy_scorer, brevity_scorer],
     aggregation=weighted_objective,
 )
@@ -558,11 +557,12 @@ openai_client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 anthropic_client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
 def summarize(text: str) -> str:
-    resp = openai_client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": text}],
+    resp = openai_client.responses.create(
+        model="gpt-6-luna",
+        reasoning={"effort": "medium"},
+        input=text,
     )
-    return resp.choices[0].message.content
+    return resp.output_text
 ```
 
 Each new provider means a new SDK, a new key distributed to every service, and
@@ -634,7 +634,7 @@ endpoints:
     endpoint_type: llm/v1/chat
     model:
       provider: openai
-      name: gpt-4o-mini
+      name: gpt-6-luna
       config:
         openai_api_key: $OPENAI_API_KEY
     # Optional: per-endpoint rate limit
@@ -711,28 +711,43 @@ print(response["choices"][0]["message"]["content"])
 emb = client.predict(endpoint="embeddings", inputs={"input": ["hello", "world"]})
 ```
 
-**Option B — OpenAI-compatible SDK** (keep your existing OpenAI code; just point
-`base_url` at the gateway and use the **endpoint name** as the model). Note the
-app carries no provider key — the gateway holds it:
+**Option B — OpenAI SDK, Responses API** (keep your existing OpenAI code; just
+point `base_url` at the gateway's OpenAI route and use the **endpoint name** as
+the model). Note the app carries no provider key — the gateway holds it:
 
 ```python
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://127.0.0.1:5000/gateway/mlflow/v1",
+    base_url="http://127.0.0.1:5000/gateway/openai/v1",
     api_key="unused",  # provider auth is handled by the gateway
 )
 
-response = client.chat.completions.create(
+response = client.responses.create(
     model="fast-chat",  # the gateway endpoint name, not the provider model
-    messages=[{"role": "user", "content": "What is MLflow AI Gateway?"}],
+    reasoning={"effort": "medium"},
+    instructions="You are a concise assistant.",  # optional system-level guidance
+    input="What is MLflow AI Gateway?",
 )
-print(response.choices[0].message.content)
+print(response.output_text)
 ```
 
-> Switching `model="fast-chat"` to `model="quality-chat"` moves you from OpenAI
-> to Anthropic with **zero** other code changes — that's the point of the
-> gateway.
+> **Thinking effort:** `reasoning={"effort": "medium"}` sets how much the model
+> reasons before answering (`low` / `medium` / `high`). The gateway passes it
+> through unchanged, so the backing model must support reasoning (non-reasoning
+> models may reject the parameter).
+
+> **Which base URL?** The Responses API (`POST /v1/responses`) is served on the
+> gateway's **OpenAI passthrough** route, `/gateway/openai/v1`. The unified
+> `/gateway/mlflow/v1` route only exposes `chat/completions`, so calling
+> `responses.create()` against it fails.
+>
+> Because it is a passthrough, the endpoint must be backed by a provider that
+> speaks the Responses API (OpenAI, Azure OpenAI / Databricks, or LiteLLM). An
+> Anthropic-backed endpoint such as `quality-chat` is not reachable on this
+> route — use the Deployments client (Option A) or the unified chat route for
+> those. Switching between OpenAI-backed endpoints (e.g. `fast-chat` →
+> another OpenAI model endpoint) is still a zero-code change.
 
 **Combine with the Prompt Registry** for the full loop — governed prompt in,
 governed model out:
@@ -755,8 +770,9 @@ print(response["choices"][0]["message"]["content"])
 
 ### How to Access an LLM Endpoint Registered in the MLflow 3.13 AI Gateway using Pydantic AI
 
-Because the gateway is OpenAI-compatible, point Pydantic AI's OpenAI model at the
-gateway's base URL and use the **endpoint name** as the model id.
+Because the gateway is OpenAI-compatible, point Pydantic AI's
+`OpenAIResponsesModel` (which uses the Responses API) at the gateway's OpenAI
+route and use the **endpoint name** as the model id.
 
 ```bash
 pip install pydantic-ai
@@ -764,16 +780,17 @@ pip install pydantic-ai
 
 ```python
 from pydantic_ai import Agent
-from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openai import OpenAIResponsesModel, OpenAIResponsesModelSettings
 from pydantic_ai.providers.openai import OpenAIProvider
 
-# Route Pydantic AI through the MLflow AI Gateway
-model = OpenAIChatModel(
+# Route Pydantic AI through the MLflow AI Gateway (Responses API)
+model = OpenAIResponsesModel(
     "fast-chat",  # MLflow gateway endpoint name
     provider=OpenAIProvider(
-        base_url="http://127.0.0.1:5000/gateway/mlflow/v1",
+        base_url="http://127.0.0.1:5000/gateway/openai/v1",
         api_key="unused",  # gateway holds the real provider key
     ),
+    settings=OpenAIResponsesModelSettings(openai_reasoning_effort="medium"),
 )
 
 agent = Agent(model, system_prompt="You are a concise assistant.")
@@ -782,8 +799,11 @@ result = agent.run_sync("Explain the MLflow AI Gateway in one sentence.")
 print(result.output)
 ```
 
-Switching the agent to a different provider is a one-line change — swap
-`"fast-chat"` for `"quality-chat"`. You can also feed the agent a governed
+Switching the agent to a different OpenAI-backed endpoint is a one-line change
+— swap the endpoint name. (For an Anthropic-backed endpoint like
+`"quality-chat"`, use `OpenAIChatModel` with
+`base_url=".../gateway/mlflow/v1"` instead, since the Responses route is
+OpenAI-passthrough only.) You can also feed the agent a governed
 system prompt straight from the Prompt Registry:
 
 ```python
@@ -869,7 +889,7 @@ endpoints:
     endpoint_type: llm/v1/chat        # or llm/v1/completions, llm/v1/embeddings
     model:
       provider: openai                # openai, anthropic, bedrock, ...
-      name: gpt-4o-mini
+      name: gpt-6-luna
       config:
         openai_api_key: $OPENAI_API_KEY
     limit:
@@ -889,11 +909,11 @@ c = get_deploy_client("http://127.0.0.1:5000")
 c.list_endpoints()
 c.predict(endpoint="fast-chat", inputs={"messages": [{"role": "user", "content": "hi"}]})
 
-# Query (OpenAI-compatible: base_url = gateway, model = endpoint name)
+# Query (OpenAI Responses API: base_url = gateway OpenAI route, model = endpoint name)
 from openai import OpenAI
-OpenAI(base_url="http://127.0.0.1:5000/gateway/mlflow/v1", api_key="unused") \
-    .chat.completions.create(model="fast-chat",
-                             messages=[{"role": "user", "content": "hi"}])
+OpenAI(base_url="http://127.0.0.1:5000/gateway/openai/v1", api_key="unused") \
+    .responses.create(model="fast-chat", input="hi",
+                      reasoning={"effort": "medium"}).output_text
 ```
 
 ### AI Gateway References

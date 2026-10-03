@@ -9,7 +9,7 @@ dependencies = [
     "loguru>=0.7.3",
     "mlflow[gateway]==3.13",
     "nest-asyncio>=1.6.0",
-    "openai>=2.50.0",
+    "openai>=2,<3",
     "pydantic-ai-slim[openai]>=1,<2",
     "python-dotenv>=1.2.2",
 ]
